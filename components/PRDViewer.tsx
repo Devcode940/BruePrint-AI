@@ -1,7 +1,8 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { PRDData, PRDComment } from '../types';
 import CollaborationPanel from './CollaborationPanel';
+import { logger } from '../utils/security';
 
 interface PRDViewerProps {
   data: PRDData;
@@ -13,6 +14,14 @@ interface PRDViewerProps {
 const PRDViewer: React.FC<PRDViewerProps> = ({ data, comments, onAddComment, onUpdateRequirementPriority }) => {
   const [activeCommentSection, setActiveCommentSection] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Memoized comment count calculation
+  const commentCountBySection = useMemo(() => {
+    return comments.reduce((acc, comment) => {
+      acc[comment.sectionId] = (acc[comment.sectionId] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [comments]);
 
   const getPriorityClasses = (priority: string) => {
     switch (priority.toLowerCase()) {
@@ -37,11 +46,13 @@ const PRDViewer: React.FC<PRDViewerProps> = ({ data, comments, onAddComment, onU
     );
   }, [data.functionalRequirements, searchQuery]);
 
-  const copyToClipboard = () => {
+  const copyToClipboard = useCallback(() => {
     const text = JSON.stringify(data, null, 2);
-    navigator.clipboard.writeText(text);
-    alert('PRD data copied to clipboard!');
-  };
+    navigator.clipboard.writeText(text).catch((err) => {
+      logger.error('Failed to copy to clipboard', err);
+      alert('Failed to copy PRD data to clipboard');
+    });
+  }, [data]);
 
   const CommentTrigger = ({ sectionId }: { sectionId: string }) => (
     <button

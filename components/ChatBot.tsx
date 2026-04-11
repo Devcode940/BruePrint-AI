@@ -1,6 +1,21 @@
-
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI } from '@google/genai';
+import { logger, sanitizeInput } from '../utils/security';
+
+// Singleton AI instance for ChatBot
+let chatAIInstance: GoogleGenAI | null = null;
+
+const getChatAIInstance = (): GoogleGenAI => {
+  if (!chatAIInstance) {
+    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY || "";
+    if (!apiKey) {
+      logger.error("ChatBot: API Key not configured");
+      throw new Error("API Key not configured");
+    }
+    chatAIInstance = new GoogleGenAI({ apiKey });
+  }
+  return chatAIInstance;
+};
 
 const ChatBot: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
@@ -10,16 +25,17 @@ const ChatBot: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  const scrollToBottom = () => {
+  
+  // Memoized scroll function
+  const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  }, []);
 
   useEffect(() => {
     if (isOpen) scrollToBottom();
-  }, [messages, isOpen]);
-
-  const handleSend = async () => {
+  }, [messages, isOpen, scrollToBottom]);
+  
+  const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
 
     const userMsg = input;
@@ -28,7 +44,7 @@ const ChatBot: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+      const ai = getChatAIInstance();
       const chat = ai.chats.create({
         model: 'gemini-3-pro-preview',
         config: {
@@ -36,14 +52,30 @@ const ChatBot: React.FC = () => {
         }
       });
 
-      const response = await chat.sendMessage({ message: userMsg });
+      const response = await chat.sendMessage({ message: sanitizeInput(userMsg) });
       setMessages(prev => [...prev, { role: 'bot', text: response.text || "Sorry, I couldn't process that." }]);
     } catch (err) {
+      logger.error('ChatBot error', err);
       setMessages(prev => [...prev, { role: 'bot', text: "Error connecting to AI. Please check your connection." }]);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [input, isLoading]);
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  }, [handleSend]);
+
+  // Memoized comment count calculation
+  const commentCountBySection = useMemo(() => {
+    return comments.reduce((acc, comment) => {
+      acc[comment.sectionId] = (acc[comment.sectionId] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+  }, [comments]);
 
   return (
     <div className="fixed bottom-6 right-6 z-[100]">
@@ -54,7 +86,7 @@ const ChatBot: React.FC = () => {
               <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
               <span className="text-white font-bold">AI Strategist</span>
             </div>
-            <button onClick={() => setIsOpen(false)} className="text-white/80 hover:text-white">
+            <button onClick={() => setIsOpen(false)} className="text-white/80 hover:text-white" aria-label="Close chat">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
@@ -88,14 +120,16 @@ const ChatBot: React.FC = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleSend()}
+              onKeyDown={handleKeyDown}
               placeholder="Ask a question..."
               className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              aria-label="Chat input"
             />
             <button
               onClick={handleSend}
               disabled={isLoading}
-              className="bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50"
+              aria-label="Send message"
+              className="bg-indigo-600 text-white p-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
@@ -107,6 +141,7 @@ const ChatBot: React.FC = () => {
         <button
           onClick={() => setIsOpen(true)}
           className="bg-indigo-600 text-white w-14 h-14 rounded-full shadow-lg hover:bg-indigo-700 transition-all hover:scale-110 flex items-center justify-center group"
+          aria-label="Open chat"
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 group-hover:rotate-12 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />

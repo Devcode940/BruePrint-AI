@@ -57,27 +57,21 @@ const PRDForm: React.FC<PRDFormProps> = ({ onSubmit, isLoading, initialData }) =
     const files = e.target.files;
     if (!files) return;
 
-    const newContextFiles: FileContext[] = [];
-
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      const reader = new FileReader();
-
-      const fileData = await new Promise<string>((resolve) => {
-        reader.onload = (e) => resolve(e.target?.result as string);
-        if (file.type.startsWith('image/')) {
-          reader.readAsDataURL(file);
-        } else {
-          reader.readAsText(file);
-        }
-      });
-
-      newContextFiles.push({
-        name: file.name,
-        type: file.type,
-        data: fileData
-      });
-    }
+    // Process files in parallel for better performance
+    const newContextFiles: FileContext[] = await Promise.all(
+      Array.from(files).map(async (file: File) => {
+        const reader = new FileReader();
+        const fileData = await new Promise<string>((resolve) => {
+          reader.onload = (e) => resolve(e.target?.result as string);
+          if (file.type.startsWith('image/')) {
+            reader.readAsDataURL(file);
+          } else {
+            reader.readAsText(file);
+          }
+        });
+        return { name: file.name, type: file.type, data: fileData };
+      })
+    );
 
     setFormData(prev => ({
       ...prev,

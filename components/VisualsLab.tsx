@@ -1,6 +1,6 @@
-
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { generateImage, generateVideo } from '../services/gemini';
+import { logger } from '../utils/security';
 
 const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
   const [activeTab, setActiveTab] = useState<'image' | 'video'>('image');
@@ -9,8 +9,20 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
   const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
   const [result, setResult] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-
+  const abortControllerRef = useRef<AbortController | null>(null);
+  
+  // Cleanup on unmount
+  React.useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
+  
   const handleGenerate = async () => {
+    // Cancel any ongoing request
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+    
     setIsLoading(true);
     setResult(null);
     try {
@@ -26,8 +38,12 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
         const url = await generateVideo(prompt, aspectRatio as '16:9' | '9:16');
         setResult(url);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        logger.info('Generation cancelled');
+        return;
+      }
+      logger.error('Visual generation failed', err);
       alert("Generation failed. Ensure you have selected an API key if required.");
     } finally {
       setIsLoading(false);
@@ -42,12 +58,14 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
           <button
             onClick={() => setActiveTab('image')}
             className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${activeTab === 'image' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}
+            aria-label="Switch to image generation"
           >
             Image
           </button>
           <button
             onClick={() => setActiveTab('video')}
             className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${activeTab === 'video' ? 'bg-white shadow-sm text-indigo-600' : 'text-slate-500'}`}
+            aria-label="Switch to video generation"
           >
             Video (Veo)
           </button>
@@ -62,6 +80,7 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none h-24"
+              aria-label="Generation prompt"
             />
           </div>
 
@@ -72,6 +91,7 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
                 value={aspectRatio}
                 onChange={(e) => setAspectRatio(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm"
+                aria-label="Select aspect ratio"
               >
                 {activeTab === 'image' ? (
                   <>
@@ -97,6 +117,7 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
                   value={imageSize}
                   onChange={(e) => setImageSize(e.target.value as any)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm"
+                  aria-label="Select quality"
                 >
                   <option value="1K">1K (Standard)</option>
                   <option value="2K">2K (High)</option>
@@ -110,6 +131,7 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
             onClick={handleGenerate}
             disabled={isLoading}
             className="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2"
+            aria-label={`Generate ${activeTab}`}
           >
             {isLoading ? (
               <span className="flex items-center gap-2">
@@ -128,7 +150,7 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
             {activeTab === 'image' ? (
               <img src={result} className="w-full rounded-xl border border-slate-200 shadow-md" alt="Generated asset" />
             ) : (
-              <video src={result} controls className="w-full rounded-xl border border-slate-200 shadow-md" />
+              <video src={result} controls className="w-full rounded-xl border border-slate-200 shadow-md" aria-label="Generated video" />
             )}
             <a
               href={result}

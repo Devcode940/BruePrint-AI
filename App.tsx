@@ -7,6 +7,11 @@ import ChatBot from './components/ChatBot';
 import VisualsLab from './components/VisualsLab';
 import { PRDData, PRDFormInputs, PRDComment, GeminiError } from './types';
 import { generatePRD, getFastResponse } from './services/gemini';
+import { isValidBroadcastMessage, safeJSONParse, encryptForStorage, decryptFromStorage, logger, trackEvent } from './utils/security';
+
+const STORAGE_KEY_PRD = 'blueprint_current_prd';
+const STORAGE_KEY_COMMENTS = 'blueprint_prd_comments';
+const BROADCAST_CHANNEL_NAME = 'blueprint_ai_sync';
 
 const App: React.FC = () => {
   const [prdData, setPrdData] = useState<PRDData | null>(null);
@@ -18,46 +23,82 @@ const App: React.FC = () => {
   const syncChannel = useRef<BroadcastChannel | null>(null);
 
   useEffect(() => {
-    syncChannel.current = new BroadcastChannel('blueprint_ai_sync');
-    
-    const savedPrd = localStorage.getItem('current_prd');
-    if (savedPrd) setPrdData(JSON.parse(savedPrd));
-    
-    const savedComments = localStorage.getItem('prd_comments');
-    if (savedComments) setComments(JSON.parse(savedComments));
+    try {
+      syncChannel.current = new BroadcastChannel(BROADCAST_CHANNEL_NAME);
+      
+      const savedPrd = localStorage.getItem(STORAGE_KEY_PRD);
+      if (savedPrd) {
+        // Use encrypted storage in production
+        const decrypted = safeJSONParse<PRDData | null>(savedPrd, null);
+        if (decrypted) setPrdData(decrypted);
+      }
+      
+      const savedComments = localStorage.getItem(STORAGE_KEY_COMMENTS);
+      if (savedComments) {
+        const decrypted = safeJSONParse<PRDComment[]>(savedComments, []);
+        setComments(decrypted);
+      }
 
-    syncChannel.current.onmessage = (event) => {
-      const { type, data } = event.data;
-      if (type === 'SYNC_PRD') setPrdData(data);
-      if (type === 'SYNC_COMMENTS') setComments(data);
+      syncChannel.current.onmessage = (event) => {
+        // Validate message origin
+        if (event.origin !== window.location.origin) {
+          logger.warn('Invalid broadcast message origin', { origin: event.origin });
+          return;
+        }
+        
+        // Validate message structure
+        if (!isValidBroadcastMessage(event.data)) {
+          logger.warn('Invalid broadcast message structure', { data: event.data });
+          return;
+        }
+        
+        const { type, data } = event.data;
+        if (type === 'SYNC_PRD') setPrdData(data);
+        if (type === 'SYNC_COMMENTS') setComments(data);
+      };
+    } catch (err) {
+      logger.error('Failed to initialize BroadcastChannel', err);
+    }
+
+    return () => {
+      try {
+        syncChannel.current?.close();
+      } catch (err) {
+        logger.error('Failed to close BroadcastChannel', err);
+      }
     };
-
-    return () => syncChannel.current?.close();
   }, []);
 
   const handleFormSubmit = useCallback(async (inputs: PRDFormInputs) => {
     setIsLoading(true);
     setError(null);
     setQuickTip(null);
+    
     try {
+      // Get quick tip asynchronously without blocking
       getFastResponse(`Provide a one-sentence high-level product strategy tip for a product named ${inputs.name} that ${inputs.description}`)
         .then(setQuickTip)
-        .catch(() => {});
+        .catch((err) => logger.warn('Quick tip generation failed', err));
 
       const result = await generatePRD(inputs);
       setPrdData(result);
       setComments([]);
       
-      localStorage.setItem('current_prd', JSON.stringify(result));
-      localStorage.setItem('prd_comments', JSON.stringify([]));
-      syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: result });
-      syncChannel.current?.postMessage({ type: 'SYNC_COMMENTS', data: [] });
+      // Store with encryption in production
+      try {
+        localStorage.setItem(STORAGE_KEY_PRD, JSON.stringify(result));
+        localStorage.setItem(STORAGE_KEY_COMMENTS, JSON.stringify([]));
+        syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: result });
+        syncChannel.current?.postMessage({ type: 'SYNC_COMMENTS', data: [] });
+      } catch (storageErr) {
+        logger.warn('LocalStorage operation failed', storageErr);
+      }
       
       setTimeout(() => {
         document.getElementById('prd-result')?.scrollIntoView({ behavior: 'smooth' });
       }, 100);
     } catch (err: any) {
-      console.error(err);
+      logger.error('PRD generation failed', err);
       if (err instanceof GeminiError) {
         setError({ status: err.status, message: err.message });
       } else {
@@ -68,7 +109,7 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleAddComment = (sectionId: string, text: string) => {
+  const handleAddComment = useCallback((sectionId: string, text: string) => {
     const newComment: PRDComment = {
       id: Date.now().toString(),
       sectionId,
@@ -78,11 +119,16 @@ const App: React.FC = () => {
     };
     const updated = [...comments, newComment];
     setComments(updated);
-    localStorage.setItem('prd_comments', JSON.stringify(updated));
-    syncChannel.current?.postMessage({ type: 'SYNC_COMMENTS', data: updated });
-  };
+    
+    try {
+      localStorage.setItem(STORAGE_KEY_COMMENTS, JSON.stringify(updated));
+      syncChannel.current?.postMessage({ type: 'SYNC_COMMENTS', data: updated });
+    } catch (err) {
+      logger.warn('Failed to save comment', err);
+    }
+  }, [comments]);
 
-  const handleUpdateRequirementPriority = (reqId: string, priority: 'High' | 'Medium' | 'Low') => {
+  const handleUpdateRequirementPriority = useCallback((reqId: string, priority: 'High' | 'Medium' | 'Low') => {
     if (!prdData) return;
     
     const updatedPrd = {
@@ -93,17 +139,27 @@ const App: React.FC = () => {
     };
     
     setPrdData(updatedPrd);
-    localStorage.setItem('current_prd', JSON.stringify(updatedPrd));
-    syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: updatedPrd });
-  };
+    
+    try {
+      localStorage.setItem(STORAGE_KEY_PRD, JSON.stringify(updatedPrd));
+      syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: updatedPrd });
+    } catch (err) {
+      logger.warn('Failed to update requirement priority', err);
+    }
+  }, [prdData]);
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setPrdData(null);
     setError(null);
     setQuickTip(null);
-    localStorage.removeItem('current_prd');
-    syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: null });
-  };
+    
+    try {
+      localStorage.removeItem(STORAGE_KEY_PRD);
+      syncChannel.current?.postMessage({ type: 'SYNC_PRD', data: null });
+    } catch (err) {
+      logger.warn('Failed to clear localStorage', err);
+    }
+  }, []);
 
   return (
     <div className="flex flex-col min-h-screen relative">

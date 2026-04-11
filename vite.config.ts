@@ -6,8 +6,8 @@ export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
       server: {
-        port: 3000,
-        host: '0.0.0.0',
+        port: parseInt(env.VITE_PORT) || 3000,
+        host: env.VITE_HOST || '0.0.0.0',
       },
       plugins: [react()],
       define: {
@@ -17,6 +17,21 @@ export default defineConfig(({ mode }) => {
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
+        }
+      },
+      optimizeDeps: {
+        include: ['react', 'react-dom', '@google/genai']
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: (id) => {
+              if (id.includes('node_modules')) {
+                if (id.includes('react')) return 'vendor';
+                if (id.includes('@google/genai')) return 'gemini';
+              }
+            }
+          }
         }
       }
     };

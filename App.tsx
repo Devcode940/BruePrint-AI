@@ -5,8 +5,8 @@ import PRDForm from './components/PRDForm';
 import PRDViewer from './components/PRDViewer';
 import ChatBot from './components/ChatBot';
 import VisualsLab from './components/VisualsLab';
-import { PRDData, PRDFormInputs, PRDComment, GeminiError } from './types';
-import { generatePRD, getFastResponse } from './services/gemini';
+import { PRDData, PRDFormInputs, PRDComment } from './types';
+import { generatePRD, getFastResponse } from './services/api';
 
 const App: React.FC = () => {
   const [prdData, setPrdData] = useState<PRDData | null>(null);
@@ -58,11 +58,10 @@ const App: React.FC = () => {
       }, 100);
     } catch (err: any) {
       console.error(err);
-      if (err instanceof GeminiError) {
-        setError({ status: err.status, message: err.message });
-      } else {
-        setError({ status: 'UNKNOWN', message: "An unexpected error occurred. Please try again." });
-      }
+      setError({ 
+        status: 'UNKNOWN', 
+        message: err.message || "An unexpected error occurred. Please try again." 
+      });
     } finally {
       setIsLoading(false);
     }

@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { generateImage, generateVideo } from '../services/gemini';
+import { generateImage, generateVideo } from '../services/api';
 
 const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
   const [activeTab, setActiveTab] = useState<'image' | 'video'>('image');
@@ -9,26 +9,23 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
   const [imageSize, setImageSize] = useState<'1K' | '2K' | '4K'>('1K');
   const [result, setResult] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     setIsLoading(true);
     setResult(null);
+    setError(null);
     try {
       if (activeTab === 'image') {
         const url = await generateImage(prompt, aspectRatio, imageSize);
         setResult(url);
       } else {
-        // Veo key selection check
-        const hasKey = await (window as any).aistudio.hasSelectedApiKey();
-        if (!hasKey) {
-          await (window as any).aistudio.openSelectKey();
-        }
         const url = await generateVideo(prompt, aspectRatio as '16:9' | '9:16');
         setResult(url);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Generation failed. Ensure you have selected an API key if required.");
+      setError(err.message || "Generation failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -105,6 +102,12 @@ const VisualsLab: React.FC<{ productName: string }> = ({ productName }) => {
               </div>
             )}
           </div>
+
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              {error}
+            </div>
+          )}
 
           <button
             onClick={handleGenerate}

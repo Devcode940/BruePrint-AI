@@ -58,9 +58,24 @@ const PRDForm: React.FC<PRDFormProps> = ({ onSubmit, isLoading, initialData }) =
     if (!files) return;
 
     const newContextFiles: FileContext[] = [];
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
+      
+      // Validate file type
+      const allowedTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain', 'text/markdown', 'application/json'];
+      if (!allowedTypes.includes(file.type)) {
+        alert(`File type ${file.type} is not allowed. Allowed types: images, .txt, .md, .json`);
+        continue;
+      }
+      
+      // Validate file size
+      if (file.size > MAX_FILE_SIZE) {
+        alert(`File ${file.name} exceeds the 5MB size limit`);
+        continue;
+      }
+
       const reader = new FileReader();
 
       const fileData = await new Promise<string>((resolve) => {
@@ -73,7 +88,7 @@ const PRDForm: React.FC<PRDFormProps> = ({ onSubmit, isLoading, initialData }) =
       });
 
       newContextFiles.push({
-        name: file.name,
+        name: file.name.replace(/[<>:"/\\|?*]/g, '_'), // Sanitize filename
         type: file.type,
         data: fileData
       });
@@ -81,7 +96,7 @@ const PRDForm: React.FC<PRDFormProps> = ({ onSubmit, isLoading, initialData }) =
 
     setFormData(prev => ({
       ...prev,
-      contextFiles: [...prev.contextFiles, ...newContextFiles]
+      contextFiles: [...prev.contextFiles, ...newContextFiles].slice(0, 10) // Enforce max 10 files
     }));
     
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -184,11 +199,12 @@ const PRDForm: React.FC<PRDFormProps> = ({ onSubmit, isLoading, initialData }) =
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
                 className="text-xs font-bold text-indigo-600 hover:text-indigo-700 flex items-center gap-1"
+                disabled={formData.contextFiles.length >= 10}
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                 </svg>
-                Upload Files
+                Upload Files {formData.contextFiles.length >= 10 && '(Max reached)'}
               </button>
               <input
                 type="file"
